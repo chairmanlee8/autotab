@@ -6,6 +6,8 @@ Application::Application()
 	, _pRenderTarget(NULL)
 	, _pLightSlateGrayBrush(NULL)
 	, _pCornflowerBlueBrush(NULL)
+	, _buffer(0)
+	, _numBytes(0)
 {
 }
 
@@ -82,6 +84,9 @@ LRESULT CALLBACK Application::WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM
 
 		::SetWindowLongPtrW(hWnd, GWLP_USERDATA, PtrToUlong(app));
 
+		// Initialize ffmpeg
+		av_register_all();
+
 		result = 1;
 	} else {
 		Application *app = reinterpret_cast<Application *>(static_cast<LONG_PTR>(::GetWindowLongPtrW(hWnd, GWLP_USERDATA)));
@@ -89,14 +94,6 @@ LRESULT CALLBACK Application::WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM
 
 		if(app) {
 			switch(msg) {
-			case WM_CREATE:
-				{
-					// Initialize ffmpeg
-					av_register_all();
-				}
-				result = 0;
-				wasHandled = true;
-				break;
 			case WM_SIZE:
 				{
 					UINT width = LOWORD(lParam), height = HIWORD(lParam);
@@ -143,7 +140,7 @@ LRESULT CALLBACK Application::WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM
 
 										if(SUCCEEDED(hr))
 										{
-											MessageBox(NULL, pszFilePath, L"File Path", MB_OK);
+											app->OnVideoLoad(pszFilePath);
 											CoTaskMemFree(pszFilePath);
 										}
 										pItem->Release();

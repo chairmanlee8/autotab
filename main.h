@@ -26,15 +26,18 @@
 #include <dwrite.h>
 #include <wincodec.h>
 #pragma comment(lib, "d2d1.lib")
+#pragma comment(lib, "windowscodecs.lib")
 
 // FFmpeg
 extern "C" {
 	#include "ffmpeg/libavcodec/avcodec.h"
 	#include "ffmpeg/libavformat/avformat.h"
+	#include "ffmpeg/libswscale/swscale.h"
 }
 #pragma comment(lib, "avcodec.lib")
 #pragma comment(lib, "avformat.lib")
 #pragma comment(lib, "avutil.lib")
+#pragma comment(lib, "swscale.lib")
 
 // Common Control Styles
 #pragma comment(linker, "\"/manifestdependency:type='Win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
@@ -88,6 +91,7 @@ private:
 
 	HRESULT OnRender();
 	void OnResize(UINT width, UINT height);
+	void OnVideoLoad(PWSTR pszFileName);
 
 	static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 private:
@@ -96,6 +100,10 @@ private:
 	ID2D1HwndRenderTarget* _pRenderTarget;
 	ID2D1SolidColorBrush* _pLightSlateGrayBrush;
 	ID2D1SolidColorBrush* _pCornflowerBlueBrush;
+
+	unsigned char *_buffer;
+	int _numBytes;
+	int _width, _height, _stride;
 };
 
 #endif

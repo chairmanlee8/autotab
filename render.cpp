@@ -69,6 +69,28 @@ HRESULT Application::OnRender()
 			_pRenderTarget->DrawLine(D2D1::Point2F(0.0f, static_cast<FLOAT>(y)), D2D1::Point2F(rtSize.width, static_cast<FLOAT>(y)), _pLightSlateGrayBrush, 0.5f);
 		}
 
+		// Try to draw bitmap.
+		if(_buffer != 0) {
+			// Why? http://social.msdn.microsoft.com/Forums/en-US/vclanguage/thread/17e9e6bd-aa91-40a3-afc9-3241a24afe00
+			IWICBitmap *pEmbeddedBitmap;
+			ID2D1Bitmap *pBitmap;
+			IWICImagingFactory *pFactory = NULL;
+			HDC screen = GetDC(0);
+			float dpiScaleX = GetDeviceCaps(screen, LOGPIXELSX) / 96.0f;
+			float dpiScaleY = GetDeviceCaps(screen, LOGPIXELSY) / 96.0f;
+			ReleaseDC(0, screen);
+
+			CoCreateInstance(CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER, IID_IWICImagingFactory, (LPVOID*) &pFactory);
+
+			HDC memDC = CreateCompatibleDC(screen);
+			hr = pFactory->CreateBitmapFromMemory(_width, _height, GUID_WICPixelFormat32bppPBGRA, _width * 4, _numBytes, _buffer, &pEmbeddedBitmap);
+
+			if(SUCCEEDED(hr)) {
+				hr = _pRenderTarget->CreateBitmapFromWicBitmap(pEmbeddedBitmap, &pBitmap);
+				_pRenderTarget->DrawBitmap(pBitmap);
+			}
+		}
+
 		hr = _pRenderTarget->EndDraw();
 	}
 
@@ -79,4 +101,105 @@ HRESULT Application::OnRender()
 	}
 
 	return hr;
+}
+
+void Application::OnVideoLoad(PWSTR pszFileName)
+{
+	// Use ffmpeg to load the video frames from the file. http://dranger.com/ffmpeg/tutorial01.html
+	AVFormatContext *pFormatContext = NULL;
+	int err;
+	char err_buf[256];
+	wchar_t werr_buf[256];
+
+	// Warning: assumes pszFileName does not contain non-ASCII chars.
+	WideCharToMultiByte(CP_ACP, 0, pszFileName, -1, err_buf, sizeof(err_buf), NULL, NULL);
+	
+	if((err = avformat_open_input(&pFormatContext, err_buf, NULL, NULL)) < 0) {
+		av_strerror(err, err_buf, sizeof(err_buf));
+		swprintf(werr_buf, sizeof(werr_buf), L"%hs", err_buf);
+		MessageBox(NULL, werr_buf, L"Could not open video file.", MB_OK);
+		return;
+	}
+
+	if(avformat_find_stream_info(pFormatContext, NULL) < 0) {
+		MessageBox(NULL, L"Could not find get file stream info.", L"Error", MB_OK);
+		avformat_close_input(&pFormatContext);
+		return;
+	}
+
+	// Find first video stream and open with codec.
+	AVCodecContext *pCodecContext = NULL;
+	AVCodec *pCodec = NULL;
+	int videoStream = -1;
+
+	for(int i = 0; i < (int)pFormatContext->nb_streams; i++) {
+		if(pFormatContext->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO) {
+			videoStream = i;
+			break;
+		}
+	}
+
+	if(videoStream == -1) {
+		MessageBox(NULL, L"Could not find any video streams in file.", L"Error", MB_OK);
+		avformat_close_input(&pFormatContext);
+		return;
+	}
+
+	pCodecContext = pFormatContext->streams[videoStream]->codec;
+	pCodec = avcodec_find_decoder(pCodecContext->codec_id);
+
+	if(pCodec == NULL) {
+		MessageBox(NULL, L"Could not find a decoder for the video format.", L"Error", MB_OK);
+		avformat_close_input(&pFormatContext);
+		return;
+	}
+
+	if(avcodec_open(pCodecContext, pCodec) < 0) {
+		MessageBox(NULL, L"Could not open codec.", L"Error", MB_OK);
+		avformat_close_input(&pFormatContext);
+		return;
+	}
+
+	// Read data from middle frame.
+	AVFrame *pFrame = avcodec_alloc_frame();
+	AVFrame *pRGBFrame = avcodec_alloc_frame();
+
+	_numBytes = avpicture_get_size(PIX_FMT_BGRA, pCodecContext->width, pCodecContext->height);
+	_buffer = (unsigned char *) av_malloc(_numBytes * sizeof(unsigned char));
+
+	avpicture_fill((AVPicture*) pRGBFrame, _buffer, PIX_FMT_BGRA, pCodecContext->width, pCodecContext->height);
+
+	int frameFinished, nFrame = 0;
+	AVPacket packet;
+	SwsContext* pSWSContext = sws_getContext(pCodecContext->width, pCodecContext->height, pCodecContext->pix_fmt, pCodecContext->width, pCodecContext->height, PIX_FMT_BGRA, SWS_BILINEAR, 0, 0, 0);
+
+	while(av_read_frame(pFormatContext, &packet) >= 0) {
+		if(packet.stream_index == videoStream) {
+			avcodec_decode_video2(pCodecContext, pFrame, &frameFinished, &packet);
+
+			if(frameFinished) {
+				if(++nFrame == 1000) {
+					sws_scale(pSWSContext, pFrame->data, pFrame->linesize, 0, pCodecContext->height, pRGBFrame->data, pRGBFrame->linesize);
+					_width = pCodecContext->width;
+					_height = pCodecContext->height;
+					_stride = pRGBFrame->linesize[0];
+
+					av_free_packet(&packet);
+					break;
+				}
+			}
+		}
+
+		av_free_packet(&packet);
+	}
+
+	av_free(pSWSContext);
+	av_free(pRGBFrame);
+	av_free(pFrame);
+
+	avcodec_close(pCodecContext);
+	avformat_close_input(&pFormatContext);
+
+	// Render
+	OnRender();
 }
